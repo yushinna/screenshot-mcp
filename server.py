@@ -1,237 +1,160 @@
 #!/usr/bin/env python3
 """
-Screenshot MCP Server for macOS
+Screenshot MCP Server for macOS using FastMCP
 An MCP server that enables natural language screenshot capture
 """
 
-import asyncio
 import subprocess
-import os
+import sys
+import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-import json
+from typing import Optional
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import (
-    Tool,
-    TextContent,
-    ImageContent,
-    EmbeddedResource,
+from mcp.server.fastmcp import FastMCP
+
+# Configure logging to stderr (stdout is reserved for JSON-RPC)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stderr
 )
 
 # Screenshot save directory
 SCREENSHOT_DIR = Path.home() / "Desktop" / "mcp-screenshots"
 SCREENSHOT_DIR.mkdir(exist_ok=True)
 
-class ScreenshotServer:
-    def __init__(self):
-        self.server = Server("screenshot-mcp")
-        self._setup_tools()
+# Initialize FastMCP server
+mcp = FastMCP("screenshot-mcp")
+
+@mcp.tool()
+def screenshot(filename: Optional[str] = None, delay: int = 0) -> str:
+    """Capture a screenshot of the entire desktop"""
+    logging.info(f"screenshot called with filename: {filename}, delay: {delay}")
+    
+    try:
+        # Generate filename
+        if not filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"screenshot_{timestamp}.png"
         
-    def _setup_tools(self):
-        """Define available tools"""
+        filepath = SCREENSHOT_DIR / filename
         
-        @self.server.list_tools()
-        async def list_tools() -> List[Tool]:
-            return [
-                Tool(
-                    name="screenshot",
-                    description="Capture a screenshot of the entire desktop",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "filename": {
-                                "type": "string",
-                                "description": "Filename to save (auto-generated if omitted)"
-                            },
-                            "delay": {
-                                "type": "integer",
-                                "description": "Delay in seconds before capture (default: 0)",
-                                "default": 0
-                            }
-                        }
-                    }
-                ),
-                Tool(
-                    name="screenshot_window",
-                    description="Capture a screenshot of a specific window (interactive selection)",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "filename": {
-                                "type": "string",
-                                "description": "Filename to save (auto-generated if omitted)"
-                            }
-                        }
-                    }
-                ),
-                Tool(
-                    name="screenshot_area",
-                    description="Capture a screenshot of a selected area (interactive selection)",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "filename": {
-                                "type": "string",
-                                "description": "Filename to save (auto-generated if omitted)"
-                            }
-                        }
-                    }
-                ),
-                Tool(
-                    name="list_screenshots",
-                    description="List saved screenshots",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "limit": {
-                                "type": "integer",
-                                "description": "Maximum number of screenshots to list (default: 10)",
-                                "default": 10
-                            }
-                        }
-                    }
-                )
-            ]
+        # Execute screencapture command
+        cmd = ["screencapture"]
+        if delay > 0:
+            cmd.extend(["-T", str(delay)])
+        cmd.append(str(filepath))
         
-        @self.server.call_tool()
-        async def call_tool(name: str, arguments: Optional[Dict[str, Any]] = None) -> List[TextContent | ImageContent | EmbeddedResource]:
-            if name == "screenshot":
-                return await self._take_screenshot(arguments or {})
-            elif name == "screenshot_window":
-                return await self._take_window_screenshot(arguments or {})
-            elif name == "screenshot_area":
-                return await self._take_area_screenshot(arguments or {})
-            elif name == "list_screenshots":
-                return await self._list_screenshots(arguments or {})
-            else:
-                return [TextContent(text=f"Unknown tool: {name}")]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            # Get file size
+            file_size = filepath.stat().st_size / 1024  # KB
+            success_msg = f"Screenshot saved successfully to {filepath} ({file_size:.1f} KB)"
+            logging.info(f"Screenshot successful: {success_msg}")
+            return success_msg
+        else:
+            error_msg = f"Error: Failed to capture screenshot\n{result.stderr}"
+            logging.error(f"Screenshot failed: {error_msg}")
+            return error_msg
+            
+    except Exception as e:
+        error_msg = f"Error: {str(e)}"
+        logging.error(f"Exception in screenshot: {error_msg}", exc_info=True)
+        return error_msg
+
+@mcp.tool()
+def screenshot_window(filename: Optional[str] = None) -> str:
+    """Capture a screenshot of a specific window (interactive selection)"""
+    logging.info(f"screenshot_window called with filename: {filename}")
     
-    async def _take_screenshot(self, args: Dict[str, Any]) -> List[TextContent]:
-        """Capture full desktop screenshot"""
-        try:
-            # Generate filename
-            filename = args.get("filename")
-            if not filename:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"screenshot_{timestamp}.png"
-            
-            filepath = SCREENSHOT_DIR / filename
-            delay = args.get("delay", 0)
-            
-            # Execute screencapture command
-            cmd = ["screencapture"]
-            if delay > 0:
-                cmd.extend(["-T", str(delay)])
-            cmd.append(str(filepath))
-            
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                # Get file size
-                file_size = filepath.stat().st_size / 1024  # KB
-                return [TextContent(
-                    text=f"Screenshot saved successfully\n"
-                         f"File: {filepath}\n"
-                         f"Size: {file_size:.1f} KB"
-                )]
-            else:
-                return [TextContent(
-                    text=f"Error: Failed to capture screenshot\n{result.stderr}"
-                )]
-                
-        except Exception as e:
-            return [TextContent(text=f"Error: {str(e)}")]
+    try:
+        if not filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"window_{timestamp}.png"
+        
+        filepath = SCREENSHOT_DIR / filename
+        
+        # -W option for window selection mode
+        cmd = ["screencapture", "-W", str(filepath)]
+        
+        subprocess.Popen(cmd)
+        
+        msg = f"Click on a window to capture screenshot...\n(Will be saved to: {filepath})"
+        logging.info(f"Window screenshot initiated: {msg}")
+        return msg
+        
+    except Exception as e:
+        error_msg = f"Error: {str(e)}"
+        logging.error(f"Exception in screenshot_window: {error_msg}", exc_info=True)
+        return error_msg
+
+@mcp.tool()
+def screenshot_area(filename: Optional[str] = None) -> str:
+    """Capture a screenshot of a selected area (interactive selection)"""
+    logging.info(f"screenshot_area called with filename: {filename}")
     
-    async def _take_window_screenshot(self, args: Dict[str, Any]) -> List[TextContent]:
-        """Capture specific window screenshot"""
-        try:
-            filename = args.get("filename")
-            if not filename:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"window_{timestamp}.png"
-            
-            filepath = SCREENSHOT_DIR / filename
-            
-            # -W option for window selection mode
-            cmd = ["screencapture", "-W", str(filepath)]
-            
-            subprocess.Popen(cmd)
-            
-            return [TextContent(
-                text="Click on a window to capture screenshot...\n"
-                     f"(Will be saved to: {filepath})"
-            )]
-            
-            # Note: screencapture runs asynchronously, so we can't detect actual capture completion
-            
-        except Exception as e:
-            return [TextContent(text=f"Error: {str(e)}")]
+    try:
+        if not filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"area_{timestamp}.png"
+        
+        filepath = SCREENSHOT_DIR / filename
+        
+        # -s option for selection mode
+        cmd = ["screencapture", "-s", str(filepath)]
+        
+        subprocess.Popen(cmd)
+        
+        msg = f"Drag to select an area to capture...\n(Will be saved to: {filepath})"
+        logging.info(f"Area screenshot initiated: {msg}")
+        return msg
+        
+    except Exception as e:
+        error_msg = f"Error: {str(e)}"
+        logging.error(f"Exception in screenshot_area: {error_msg}", exc_info=True)
+        return error_msg
+
+@mcp.tool()
+def list_screenshots(limit: int = 10) -> str:
+    """List saved screenshots"""
+    logging.info(f"list_screenshots called with limit: {limit}")
     
-    async def _take_area_screenshot(self, args: Dict[str, Any]) -> List[TextContent]:
-        """Capture selected area screenshot"""
-        try:
-            filename = args.get("filename")
-            if not filename:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"area_{timestamp}.png"
-            
-            filepath = SCREENSHOT_DIR / filename
-            
-            # -s option for selection mode
-            cmd = ["screencapture", "-s", str(filepath)]
-            
-            subprocess.Popen(cmd)
-            
-            return [TextContent(
-                text="Drag to select an area to capture...\n"
-                     f"(Will be saved to: {filepath})"
-            )]
-            
-        except Exception as e:
-            return [TextContent(text=f"Error: {str(e)}")]
-    
-    async def _list_screenshots(self, args: Dict[str, Any]) -> List[TextContent]:
-        """List saved screenshots"""
-        try:
-            limit = args.get("limit", 10)
-            
-            # Get PNG files sorted by modification time
-            screenshots = sorted(
-                SCREENSHOT_DIR.glob("*.png"),
-                key=lambda x: x.stat().st_mtime,
-                reverse=True
-            )[:limit]
-            
-            if not screenshots:
-                return [TextContent(text="No screenshots found")]
-            
-            # Create list
-            lines = ["Recent screenshots:"]
-            for i, screenshot in enumerate(screenshots, 1):
-                size_kb = screenshot.stat().st_size / 1024
-                mtime = datetime.fromtimestamp(screenshot.stat().st_mtime)
-                lines.append(
-                    f"{i}. {screenshot.name} "
-                    f"({size_kb:.1f} KB, {mtime.strftime('%Y-%m-%d %H:%M:%S')})"
-                )
-            
-            return [TextContent(text="\n".join(lines))]
-            
-        except Exception as e:
-            return [TextContent(text=f"Error: {str(e)}")]
-    
-    async def run(self):
-        """Start the server"""
-        async with stdio_server() as (read_stream, write_stream):
-            await self.server.run(read_stream, write_stream, self.server.create_initialization_options())
+    try:
+        # Get PNG files sorted by modification time
+        screenshots = sorted(
+            SCREENSHOT_DIR.glob("*.png"),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True
+        )[:limit]
+        
+        if not screenshots:
+            return "No screenshots found"
+        
+        # Create list
+        lines = ["Recent screenshots:"]
+        for i, screenshot in enumerate(screenshots, 1):
+            size_kb = screenshot.stat().st_size / 1024
+            mtime = datetime.fromtimestamp(screenshot.stat().st_mtime)
+            lines.append(
+                f"{i}. {screenshot.name} "
+                f"({size_kb:.1f} KB, {mtime.strftime('%Y-%m-%d %H:%M:%S')})"
+            )
+        
+        result = "\n".join(lines)
+        logging.info(f"Listed {len(screenshots)} screenshots")
+        return result
+        
+    except Exception as e:
+        error_msg = f"Error: {str(e)}"
+        logging.error(f"Exception in list_screenshots: {error_msg}", exc_info=True)
+        return error_msg
 
 def main():
     """Main function"""
-    server = ScreenshotServer()
-    asyncio.run(server.run())
+    logging.info("Starting FastMCP screenshot server...")
+    mcp.run(transport="stdio")
 
 if __name__ == "__main__":
     main()

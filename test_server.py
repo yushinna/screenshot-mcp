@@ -17,19 +17,19 @@ async def test_mcp_server():
     # 1. Import test
     print("1. Testing module import...")
     try:
-        from server import ScreenshotServer
+        from server import mcp, screenshot, screenshot_window, screenshot_area, list_screenshots
         print("✓ Successfully imported server.py")
     except ImportError as e:
         print(f"✗ Import error: {e}")
         return
     
-    # 2. Server instance creation
-    print("\n2. Creating server instance...")
+    # 2. Test functions directly
+    print("\n2. Testing screenshot function...")
     try:
-        server = ScreenshotServer()
-        print("✓ Successfully created ScreenshotServer instance")
+        result = screenshot()
+        print("✓ Screenshot function works")
     except Exception as e:
-        print(f"✗ Instance creation error: {e}")
+        print(f"✗ Function test error: {e}")
         return
     
     # 3. Screenshot directory check
