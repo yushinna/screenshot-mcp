@@ -179,3 +179,17 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+mcp-screenshots/
+*.png
+*.jpg
+*.jpeg
+*.pdf
+
+# Logs
+*.log
